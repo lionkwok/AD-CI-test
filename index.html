@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Check-in System</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+        .title { font-size: 28px; font-weight: bold; color: #1a202c; }
+        .subtitle { color: #718096; margin-top: 4px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #5568d3; }
+        .btn-secondary { background: #4a5568; color: white; }
+        .btn-secondary:hover { background: #2d3748; }
+        .btn-success { background: #48bb78; color: white; }
+        .btn-success:hover { background: #38a169; }
+        .btn-danger { background: #f56565; color: white; }
+        .btn-danger:hover { background: #e53e3e; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 20px; }
+        .stat-card { background: #f7fafc; padding: 20px; border-radius: 8px; }
+        .stat-value { font-size: 32px; font-weight: bold; margin-top: 8px; }
+        .stat-label { color: #4a5568; font-size: 14px; font-weight: 500; }
+        .search-box { position: relative; margin-bottom: 20px; }
+        .search-input { width: 100%; padding: 16px 16px 16px 48px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 18px; }
+        .search-input:focus { outline: none; border-color: #667eea; }
+        .search-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: #a0aec0; pointer-events: none; }
+        .guest-list { max-height: 400px; overflow-y: auto; }
+        .guest-item { padding: 16px; border: 2px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; cursor: pointer; transition: all 0.2s; }
+        .guest-item:hover { border-color: #667eea; background: #edf2f7; }
+        .guest-item.disabled { opacity: 0.6; cursor: not-allowed; background: #f7fafc; }
+        .guest-item.disabled:hover { border-color: #e2e8f0; background: #f7fafc; }
+        .guest-name { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+        .guest-info { color: #718096; font-size: 14px; }
+        .confirmation { background: #48bb78; color: white; text-align: center; padding: 40px; border-radius: 12px; animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.9; } }
+        .confirmation-title { font-size: 32px; font-weight: bold; margin-bottom: 16px; }
+        .confirmation-box { background: white; color: #48bb78; padding: 24px; border-radius: 8px; margin-top: 16px; }
+        .table-info { font-size: 24px; font-weight: bold; margin-top: 8px; }
+        textarea { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-family: monospace; resize: vertical; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f7fafc; font-weight: 600; position: sticky; top: 0; }
+        tr:hover { background: #f7fafc; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge-success { background: #c6f6d5; color: #22543d; }
+        .badge-pending { background: #e2e8f0; color: #4a5568; }
+        .hidden { display: none; }
+        .flex { display: flex; gap: 12px; align-items: center; }
+        .flex-end { justify-content: flex-end; }
+        .file-upload { display: inline-block; padding: 10px 20px; background: #667eea; color: white; border-radius: 8px; cursor: pointer; font-weight: 600; }
+        .file-upload:hover { background: #5568d3; }
+        input[type="file"] { display: none; }
+        .video-container { position: relative; width: 100%; max-width: 500px; margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden; }
+        video { width: 100%; display: block; }
+        .scan-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 3px solid #48bb78; width: 250px; height: 250px; border-radius: 8px; }
+        .scan-status { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; min-width: 300px; text-align: center; }
+        .status-scanning { background: rgba(66, 153, 225, 0.9); }
+        .status-partial { background: rgba(237, 137, 54, 0.9); }
+        .status-invalid { background: rgba(245, 101, 101, 0.9); }
+        .status-valid { background: rgba(72, 187, 120, 0.9); }
+        #qrCanvas { display: none; }
+        .table-responsive { overflow-x: auto; max-height: 500px; overflow-y: auto; }
+        .sync-info { font-size: 12px; color: #718096; margin-top: 8px; }
+        .sync-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .sync-indicator.synced { background: #48bb78; }
+        .sync-indicator.syncing { background: #ed8936; animation: blink 1s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .filter-tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .filter-tab { padding: 8px 16px; border: 2px solid #e2e8f0; border-radius: 8px; cursor: pointer; background: white; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+        .filter-tab:hover { border-color: #667eea; }
+        .filter-tab.active { background: #667eea; color: white; border-color: #667eea; }
+        @media (max-width: 768px) {
+            .title { font-size: 20px; }
+            .header { flex-direction: column; align-items: stretch; }
+            .stats { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="app"></div>
+
+    <script>
+        const FIREBASE_URL = localStorage.getItem('firebaseUrl') || null;
+        const STORAGE_KEY = 'eventGuestsCloud';
+        let scanStatus = 'scanning';
+        let scanMessage = 'Scanning for QR code...';
+        let lastScanAttempt = Date.now();
+
+        let state = {
+            view: 'checkin',
+            guests: [],
+            searchTerm: '',
+            selectedGuest: null,
+            showConfirmation: false,
+            csvInput: '',
+            lastSync: null,
+            scanning: false,
+            syncing: false,
+            filter: 'all'
+        };
+
+        async function loadData() {
+            if (FIREBASE_URL) {
+                try {
+                    const response = await fetch(FIREBASE_URL);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data) {
+                            state.guests = data.guests || [];
+                            state.lastSync = data.lastUpdated;
+                            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.log('Firebase sync not available');
+                }
+            }
+            
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const data = JSON.parse(saved);
+                state.guests = data.guests || [];
+                state.lastSync = data.lastUpdated;
+            }
+        }
+
+        async function saveData() {
+            const data = {
+                guests: state.guests,
+                lastUpdated: new Date().toISOString()
+            };
+            
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            state.lastSync = data.lastUpdated;
+            
+            if (FIREBASE_URL) {
+                try {
+                    state.syncing = true;
+                    await fetch(FIREBASE_URL, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    state.syncing = false;
+                } catch (e) {
+                    console.log('Cloud sync failed');
+                    state.syncing = false;
+                }
+            }
+        }
+
+        function generateQRCode(guestId, guestName) {
+            const container = document.createElement('div');
+            container.style.cssText = 'width: 400px; height: 450px; background: white; padding: 20px; text-align: center;';
+            
+            const title = document.createElement('div');
+            title.style.cssText = 'font-size: 18px; font-weight: bold; margin-bottom: 10px;';
+            title.textContent = guestName;
+            container.appendChild(title);
+            
+            const qrDiv = document.createElement('div');
+            qrDiv.style.cssText = 'width: 360px; height: 360px; margin: 0 auto;';
+            container.appendChild(qrDiv);
+            
+            const info = document.createElement('div');
+            info.style.cssText = 'margin-top: 10px; font-size: 14px; color: #666;';
+            const guest = state.guests.find(g => g.id === guestId);
+            info.textContent = 'Table ' + guest.table + ', Seat ' + guest.seat;
+            container.appendChild(info);
+            
+            document.body.appendChild(container);
+            
+            new QRCode(qrDiv, {
+                text: 'CHECKIN:' + guestId,
+                width: 360,
+                height: 360,
+                colorDark: '#000000',
+                colorLight: '#ffffff'
+            });
+            
+            setTimeout(function() {
+                const canvas = qrDiv.querySelector('canvas');
+                const wrapperCanvas = document.createElement('canvas');
+                wrapperCanvas.width = 400;
+                wrapperCanvas.height = 450;
+                const ctx = wrapperCanvas.getContext('2d');
+                
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, 400, 450);
+                
+                ctx.font = 'bold 18px Arial';
+                ctx.fillStyle = 'black';
+                ctx.textAlign = 'center';
+                ctx.fillText(guestName, 200, 30);
+                
+                ctx.drawImage(canvas, 20, 50, 360, 360);
+                
+                ctx.font = '14px Arial';
+                ctx.fillStyle = '#666';
+                ctx.fillText('Table ' + guest.table + ', Seat ' + guest.seat, 200, 435);
+                
+                const dataUrl = wrapperCanvas.toDataURL('image/png');
+                document.body.removeChild(container);
+                
+                const link = document.createElement('a');
+                link.download = 'QR_' + guestName.replace(/\s+/g, '_') + '_T' + guest.table + '_S' + guest.seat + '.png';
+                link.href = dataUrl;
+                link.click();
+            }, 500);
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                parseCSV(content);
+            };
+            reader.readAsText(file);
+        }
+
+        function parseCSV(content) {
+            const lines = content.trim().split('\n');
+            const newGuests = [];
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (i === 0 && line.toLowerCase().includes('name')) continue;
+                const parts = line.split(',').map(function(s) { return s.trim(); });
+                if (parts.length >= 4) {
+                    const name = parts[0];
+                    const phone = parts[1] || '';
+                    const table = parts[2];
+                    const seat = parts[3];
+                    if (name && table && seat) {
+                        newGuests.push({
+                            id: Date.now() + i,
+                            name: name,
+                            phone: phone,
+                            table: table,
+                            seat: seat,
+                            checkedIn: false,
+                            checkInTime: null
+                        });
+                    }
+                }
+            }
+            
+            if (newGuests.length > 0) {
+                state.guests = newGuests;
+                saveData();
+                alert('Successfully imported ' + newGuests.length + ' guests!');
+                render();
+            } else {
+                alert('No valid data found. Format: Name, Phone, Table, Seat');
+            }
+        }
+
+        function importCSV() {
+            parseCSV(state.csvInput);
+            state.csvInput = '';
+        }
+
+        function deleteGuest(id) {
+            if (confirm('Are you sure you want to delete this guest?')) {
+                state.guests = state.guests.filter(function(g) { return g.id !== id; });
+                saveData();
+                render();
+            }
+        }
+
+        function downloadSingleQR(id, name) {
+            generateQRCode(id, name);
+        }
+
+        function downloadAllQR() {
+            if (state.guests.length === 0) {
+                alert('No guests to generate QR codes for!');
+                return;
+            }
+            
+            let index = 0;
+            function downloadNext() {
+                if (index < state.guests.length) {
+                    const guest = state.guests[index];
+                    generateQRCode(guest.id, guest.name);
+                    index++;
+                    setTimeout(downloadNext, 800);
+                }
+            }
+            downloadNext();
+            
+            alert('Downloading ' + state.guests.length + ' QR codes. This will take about ' + Math.ceil(state.guests.length * 0.8 / 60) + ' minutes...');
+        }
+
+        async function startScanner() {
+            state.scanning = true;
+            state.view = 'scanner';
+            scanStatus = 'scanning';
+            scanMessage = 'Initializing camera...';
+            render();
+            
+            try {
+                const video = document.getElementById('scannerVideo');
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                video.srcObject = stream;
+                await video.play();
+                
+                scanStatus = 'scanning';
+                scanMessage = 'Scanning for QR code...';
+                lastScanAttempt = Date.now();
+                updateScannerUI();
+                scanQRCode();
+            } catch (err) {
+                alert('Camera access denied. Please enable camera permissions and try again.');
+                state.scanning = false;
+                state.view = 'checkin';
+                render();
+            }
+        }
+
+        function updateScannerUI() {
+            const statusEl = document.getElementById('scanStatus');
+            if (statusEl) {
+                statusEl.className = 'scan-status status-' + scanStatus;
+                statusEl.textContent = scanMessage;
+            }
+        }
+
+        function scanQRCode() {
+            if (!state.scanning) return;
+            
+            const video = document.getElementById('scannerVideo');
+            const canvas = document.getElementById('qrCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
+                
+                if (code) {
+                    if (code.data.indexOf('CHECKIN:') === 0) {
+                        const guestId = parseInt(code.data.split(':')[1]);
+                        const guest = state.guests.find(function(g) { return g.id === guestId; });
+                        
+                        if (guest) {
+                            scanStatus = 'valid';
+                            scanMessage = '✓ Found: ' + guest.name;
+                            updateScannerUI();
+                            
+                            setTimeout(function() {
+                                stopScanner();
+                                state.selectedGuest = guest;
+                                state.view = 'checkin';
+                                render();
+                            }, 1000);
+                            return;
+                        } else {
+                            scanStatus = 'invalid';
+                            scanMessage = '✗ QR code not in guest list';
+                            updateScannerUI();
+                        }
+                    } else {
+                        scanStatus = 'invalid';
+                        scanMessage = '✗ Not a valid check-in QR code';
+                        updateScannerUI();
+                    }
+                } else {
+                    const timeSinceLastAttempt = Date.now() - lastScanAttempt;
+                    if (timeSinceLastAttempt > 3000) {
+                        scanStatus = 'scanning';
+                        scanMessage = '⟳ No QR code detected - keep trying...';
+                        updateScannerUI();
+                    }
+                }
+            }
+            
+            requestAnimationFrame(scanQRCode);
+        }
+
+        function stopScanner() {
+            state.scanning = false;
+            const video = document.getElementById('scannerVideo');
+            if (video && video.srcObject) {
+                video.srcObject.getTracks().forEach(function(track) { track.stop(); });
+            }
+        }
+
+        function checkIn(guestId) {
+            state.guests = state.guests.map(function(g) {
+                if (g.id === guestId) {
+                    return {
+                        id: g.id,
+                        name: g.name,
+                        phone: g.phone,
+                        table: g.table,
+                        seat: g.seat,
+                        checkedIn: true,
+                        checkInTime: new Date().toISOString()
+                    };
+                }
+                return g;
+            });
+            saveData();
+            state.showConfirmation = true;
+            state.searchTerm = '';
+            
+            setTimeout(function() {
+                state.showConfirmation = false;
+                state.selectedGuest = null;
+                render();
+            }, 4000);
+            
+            render();
+        }
+
+        function exportData() {
+            let csv = 'Name,Phone,Table,Seat,Status,Check-in Time\n';
+            for (let i = 0; i < state.guests.length; i++) {
+                const g = state.guests[i];
+                csv += '"' + g.name + '",';
+                csv += (g.phone || '') + ',';
+                csv += g.table + ',';
+                csv += g.seat + ',';
+                csv += (g.checkedIn ? 'Checked In' : 'Pending') + ',';
+                csv += (g.checkInTime ? new Date(g.checkInTime).toLocaleString() : '') + '\n';
+            }
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'checkin-report-' + new Date().toISOString().split('T')[0] + '.csv';
+            link.click();
+        }
+
+        function getFilteredGuests() {
+            const term = state.searchTerm.toLowerCase();
+            let filtered = state.guests;
+            
+            // Apply status filter
+            if (state.filter === 'checked-in') {
+                filtered = filtered.filter(function(g) { return g.checkedIn; });
+            } else if (state.filter === 'pending') {
+                filtered = filtered.filter(function(g) { return !g.checkedIn; });
+            }
+            
+            // Apply search
+            if (term) {
+                filtered = filtered.filter(function(g) {
+                    return g.name.toLowerCase().indexOf(term) >= 0 ||
+                           (g.phone && g.phone.indexOf(term) >= 0);
+                });
+            }
+            
+            return filtered;
+        }
+
+        function getStats() {
+            return {
+                total: state.guests.length,
+                checkedIn: state.guests.filter(function(g) { return g.checkedIn; }).length,
+                pending: state.guests.filter(function(g) { return !g.checkedIn; }).length
+            };
+        }
+
+        function setupFirebase() {
+            const url = prompt('Enter your Firebase Realtime Database URL:\n\nExample: https://your-project.firebaseio.com/checkin.json\n\nLeave empty to skip cloud sync.');
+            if (url) {
+                localStorage.setItem('firebaseUrl', url);
+                location.reload();
+            }
+        }
+
+        function renderAdmin() {
+            let html = '<div class="card">';
+            html += '<div class="header">';
+            html += '<div>';
+            html += '<h1 class="title">Admin Panel</h1>';
+            html += '<p class="subtitle">Manage guest list and generate QR codes</p>';
+            if (FIREBASE_URL) {
+                html += '<p class="sync-info"><span class="sync-indicator ' + (state.syncing ? 'syncing' : 'synced') + '"></span>Cloud sync ' + (state.syncing ? 'syncing' : 'enabled') + '</p>';
+            } else {
+                html += '<p class="sync-info">Local mode • <a href="#" onclick="setupFirebase(); return false;" style="color: #667eea;">Setup cloud sync</a></p>';
+            }
+            html += '</div>';
+            html += '<button class="btn btn-secondary" onclick="changeView(\'checkin\')">Back to Check-in</button>';
+            html += '</div></div>';
+
+            html += '<div class="card">';
+            html += '<h2 style="margin-bottom: 16px; font-size: 20px;">Import Guest List</h2>';
+            html += '<p style="color: #718096; margin-bottom: 12px;">Format: Name, Phone, Table, Seat (one guest per line)</p>';
+            html += '<div style="margin-bottom: 16px;">';
+            html += '<label for="fileUpload" class="file-upload">📁 Upload CSV File</label>';
+            html += '<input type="file" id="fileUpload" accept=".csv">';
+            html += '<span style="margin-left: 12px; color: #718096; font-size: 14px;">or paste below</span>';
+            html += '</div>';
+            html += '<div style="background: #edf2f7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px;">';
+            html += '<strong>Example CSV format:</strong><br>';
+            html += 'Name, Phone, Table, Seat<br>';
+            html += 'John Doe, 0123456789, 5, 3<br>';
+            html += 'Jane Smith, 0198765432, 5, 4';
+            html += '</div>';
+            html += '<textarea id="csvInput" rows="8" placeholder="Or paste CSV data here..."></textarea>';
+            html += '<button class="btn btn-primary" onclick="state.csvInput = document.getElementById(\'csvInput\').value; importCSV()" style="margin-top: 12px;">📤 Import from Text</button>';
+            html += '</div>';
+
+            if (state.guests.length > 0) {
+                html += '<div class="card">';
+                html += '<div class="header">';
+                html += '<h2 style="font-size: 20px;">Guest List (' + state.guests.length + ')</h2>';
+                html += '<div class="flex">';
+                html += '<button class="btn btn-success" onclick="downloadAllQR()">⬇️ Download All QR</button>';
+                html += '<button class="btn btn-primary" onclick="exportData()">📊 Export Report</button>';
+                html += '</div></div>';
+                html += '<div class="table-responsive" style="margin-top: 16px;">';
+                html += '<table><thead><tr>';
+                html += '<th>Name</th><th>Phone</th><th>Table</th><th>Seat</th><th>Status</th><th>QR Code</th><th>Actions</th>';
+                html += '</tr></thead><tbody>';
+                
+                for (let i = 0; i < state.guests.length; i++) {
+                    const g = state.guests[i];
+                    html += '<tr>';
+                    html += '<td>' + g.name + '</td>';
+                    html += '<td>' + (g.phone || '-') + '</td>';
+                    html += '<td>' + g.table + '</td>';
+                    html += '<td>' + g.seat + '</td>';
+                    html += '<td><span class="badge ' + (g.checkedIn ? 'badge-success' : 'badge-pending') + '">';
+                    html += (g.checkedIn ? 'Checked In' : 'Pending') + '</span></td>';
+                    html += '<td><button class="btn btn-sm btn-primary" onclick="downloadSingleQR(' + g.id + ', \'' + g.name.replace(/'/g, "\\'") + '\')">Download</button></td>';
+                    html += '<td><button class="btn btn-sm btn-danger" onclick="deleteGuest(' + g.id + ')">Delete</button></td>';
+                    html += '</tr>';
+                }
+                
+                html += '</tbody></table></div></div>';
+            }
+            
+            return html;
+        }
+
+        function renderScanner() {
+            let html = '<div class="card">';
+            html += '<div class="header">';
+            html += '<h2 style="font-size: 24px;">📷 Scan QR Code</h2>';
+            html += '<button class="btn btn-secondary" onclick="stopScanner(); changeView(\'checkin\')">Cancel</button>';
+            html += '</div>';
+            html += '<div class="video-container" style="margin-top: 20px;">';
+            html += '<video id="scannerVideo" autoplay playsinline></video>';
+            html += '<div class="scan-overlay"></div>';
+            html += '<div id="scanStatus" class="scan-status status-' + scanStatus + '">' + scanMessage + '</div>';
+            html += '</div>';
+            html += '<canvas id="qrCanvas"></canvas>';
+            html += '<p style="text-align: center; margin-top: 16px; color: #718096;">Position the QR code within the green frame</p>';
+            html += '</div>';
+            return html;
+        }
+
+        function renderDashboard() {
+            const stats = getStats();
+            const filtered = getFilteredGuests();
+            
+            let html = '<div class="card">';
+            html += '<div class="header">';
+            html += '<div><h1 class="title">Staff Dashboard</h1>';
+            html += '<p class="subtitle">Real-time attendance monitoring</p></div>';
+            html += '<button class="btn btn-primary" onclick="changeView(\'checkin\')">Back</button>';
+            html += '</div>';
+            html += '<div class="stats">';
+            html += '<div class="stat-card" style="border-left: 4px solid #4299e1;">';
+            html += '<div class="stat-label">📊 Total Guests</div>';
+            html += '<div class="stat-value" style="color: #4299e1;">' + stats.total + '</div>';
+            html += '</div>';
+            html += '<div class="stat-card" style="border-left: 4px solid #48bb78;">';
+            html += '<div class="stat-label">✅ Checked In</div>';
+            html += '<div class="stat-value" style="color: #48bb78;">' + stats.checkedIn + '</div>';
+            html += '<div style="font-size: 12px; color: #718096; margin-top: 4px;">';
+            html += (stats.total > 0 ? Math.round((stats.checkedIn / stats.total) * 100) : 0) + '% attendance';
+            html += '</div></div>';
+            html += '<div class="stat-card" style="border-left: 4px solid #ed8936;">';
+            html += '<div class="stat-label">⏳ Pending</div>';
+            html += '<div class="stat-value" style="color: #ed8936;">' + stats.pending + '</div>';
+            html += '</div></div></div>';
+
+            html += '<div class="card">';
+            html += '<h2 style="font-size: 20px; margin-bottom: 16px;">Guest List</h2>';
+            
+            // Filter tabs
+            html += '<div class="filter-tabs">';
+            html += '<button class="filter-tab ' + (state.filter === 'all' ? 'active' : '') + '" onclick="state.filter=\'all\'; render()">All (' + stats.total + ')</button>';
+            html += '<button class="filter-tab ' + (state.filter === 'checked-in' ? 'active' : '') + '" onclick="state.filter=\'checked-in\'; render()">Checked In (' + stats.checkedIn + ')</button>';
+            html += '<button class="filter-tab ' + (state.filter === 'pending' ? 'active' : '') + '" onclick="state.filter=\'pending\'; render()">Pending (' + stats.pending + ')</button>';
+            html += '</div>';
+            
+            html += '<input type="text" class="search-input" placeholder="Search by name or phone..." value="' + state.searchTerm + '" id="dashboardSearch">';
+            html += '<div class="table-responsive" style="margin-top: 16px;">';
+            html += '<table><thead><tr>';
+            html += '<th>Name</th><th>Phone</th><th>Table</th><th>Seat</th><th>Status</th><th>Time</th>';
+            html += '</tr></thead><tbody>';
+            
+            for (let i = 0; i < filtered.length; i++) {
+                const g = filtered[i];
+                html += '<tr>';
+                html += '<td>' + g.name + '</td>';
+                html += '<td>' + (g.phone || '-') + '</td>';
+                html += '<td>' + g.table + '</td>';
+                html += '<td>' + g.seat + '</td>';
+                html += '<td><span class="badge ' + (g.checkedIn ? 'badge-success' : 'badge-pending') + '">';
+                html += (g.checkedIn ? 'Checked In' : 'Pending') + '</span></td>';
+                html += '<td style="font-size: 12px; color: #718096;">';
+                html += (g.checkInTime ? new Date(g.checkInTime).toLocaleTimeString() : '-') + '</td>';
+                html += '</tr>';
+            }
+            
+            html += '</tbody></table></div></div>';
+            return html;
+        }
+
+        function renderCheckin() {
+            const stats = getStats();
+            const filtered = getFilteredGuests();
+            
+            let html = '<div class="card">';
+            html += '<div class="header">';
+            html += '<div><h1 class="title">🎉 Annual Dinner Check-in</h1>';
+            html += '<p class="subtitle">Scan QR code or search your name</p></div>';
+            html += '<div class="flex">';
+            html += '<button class="btn btn-secondary" onclick="changeView(\'admin\')">⚙️ Admin</button>';
+            html += '<button class="btn btn-primary" onclick="changeView(\'dashboard\')">📊 Dashboard</button>';
+            html += '</div></div>';
+            html += '<div class="stats">';
+            html += '<div class="stat-card" style="border-left: 4px solid #4299e1;">';
+            html += '<div class="stat-label">Total</div>';
+            html += '<div class="stat-value" style="color: #4299e1;">' + stats.total + '</div>';
+            html += '</div>';
+            html += '<div class="stat-card" style="border-left: 4px solid #48bb78;">';
+            html += '<div class="stat-label">Checked In</div>';
+            html += '<div class="stat-value" style="color: #48bb78;">' + stats.checkedIn + '</div>';
+            html += '</div>';
+            html += '<div class="stat-card" style="border-left: 4px solid #ed8936;">';
+            html += '<div class="stat-label">Pending</div>';
+            html += '<div class="stat-value" style="color: #ed8936;">' + stats.pending + '</div>';
+            html += '</div></div></div>';
+
+            if (state.showConfirmation && state.selectedGuest) {
+                html += '<div class="confirmation">';
+                html += '<div style="font-size: 48px; margin-bottom: 16px;">✅</div>';
+                html += '<div class="confirmation-title">Welcome!</div>';
+                html += '<p style="font-size: 20px; margin-bottom: 16px;">You\'re all checked in</p>';
+                html += '<div class="confirmation-box">';
+                html += '<p style="font-size: 24px; font-weight: bold; margin-bottom: 12px;">' + state.selectedGuest.name + '</p>';
+                html += '<div class="table-info">📍 Table ' + state.selectedGuest.table + ', Seat ' + state.selectedGuest.seat + '</div>';
+                html += '</div></div>';
+            } else if (state.selectedGuest) {
+                html += '<div class="card">';
+                html += '<h2 style="font-size: 24px; text-align: center; margin-bottom: 24px;">Confirm Check-in</h2>';
+                html += '<div style="background: #edf2f7; padding: 24px; border-radius: 8px; margin-bottom: 24px;">';
+                html += '<div style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">👤 ' + state.selectedGuest.name + '</div>';
+                if (state.selectedGuest.phone) {
+                    html += '<div style="font-size: 16px; color: #4a5568; margin-bottom: 8px;">📱 ' + state.selectedGuest.phone + '</div>';
+                }
+                html += '<div style="font-size: 18px; color: #4a5568;">📍 Table ' + state.selectedGuest.table + ', Seat ' + state.selectedGuest.seat + '</div>';
+                html += '</div>';
+                html += '<div class="flex">';
+                html += '<button class="btn btn-secondary" onclick="state.selectedGuest = null; render()" style="flex: 1;">Cancel</button>';
+                html += '<button class="btn btn-primary" onclick="checkIn(' + state.selectedGuest.id + ')" style="flex: 1;">Confirm Check-in</button>';
+                html += '</div></div>';
+            } else {
+                html += '<div class="card">';
+                html += '<button class="btn btn-success" onclick="startScanner()" style="width: 100%; padding: 20px; font-size: 18px; margin-bottom: 20px;">📷 Scan QR Code</button>';
+                html += '<div style="text-align: center; margin-bottom: 20px; color: #718096;">- OR -</div>';
+                html += '<div class="search-box">';
+                html += '<span class="search-icon">🔍</span>';
+                html += '<input type="text" class="search-input" placeholder="Search by name or phone..." value="' + state.searchTerm + '" id="checkinSearch" autofocus>';
+                html += '</div>';
+                
+                if (state.searchTerm) {
+                    html += '<div class="guest-list">';
+                    if (filtered.length > 0) {
+                        for (let i = 0; i < Math.min(10, filtered.length); i++) {
+                            const g = filtered[i];
+                            html += '<div class="guest-item ' + (g.checkedIn ? 'disabled' : '') + '" data-guest-id="' + g.id + '" data-checked-in="' + g.checkedIn + '">';
+                            html += '<div class="guest-name">👤 ' + g.name + '</div>';
+                            html += '<div class="guest-info">';
+                            if (g.phone) html += '📱 ' + g.phone + ' • ';
+                            html += '📍 Table ' + g.table + ', Seat ' + g.seat;
+                            if (g.checkedIn) html += ' • <span style="color: #48bb78;">✅ Already Checked In</span>';
+                            html += '</div></div>';
+                        }
+                    } else {
+                        html += '<p style="text-align: center; color: #718096; padding: 40px;">No guests found</p>';
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            
+            return html;
+        }
+
+        function render() {
+            const app = document.getElementById('app');
+            let content = '';
+            
+            if (state.view === 'admin') content = renderAdmin();
+            else if (state.view === 'dashboard') content = renderDashboard();
+            else if (state.view === 'scanner') content = renderScanner();
+            else content = renderCheckin();
+            
+            app.innerHTML = content;
+            
+            setTimeout(function() {
+                // Attach file upload handler
+                const fileUpload = document.getElementById('fileUpload');
+                if (fileUpload) {
+                    fileUpload.onchange = handleFileUpload;
+                }
+                
+                // Attach search handlers with debouncing
+                const checkinSearch = document.getElementById('checkinSearch');
+                if (checkinSearch) {
+                    checkinSearch.value = state.searchTerm;
+                    checkinSearch.oninput = function(e) {
+                        state.searchTerm = e.target.value;
+                        clearTimeout(window.searchTimeout);
+                        window.searchTimeout = setTimeout(function() {
+                            const cursorPos = e.target.selectionStart;
+                            render();
+                            setTimeout(function() {
+                                const newInput = document.getElementById('checkinSearch');
+                                if (newInput) {
+                                    newInput.setSelectionRange(cursorPos, cursorPos);
+                                    newInput.focus();
+                                }
+                            }, 0);
+                        }, 300);
+                    };
+                }
+                
+                const dashboardSearch = document.getElementById('dashboardSearch');
+                if (dashboardSearch) {
+                    dashboardSearch.value = state.searchTerm;
+                    dashboardSearch.oninput = function(e) {
+                        state.searchTerm = e.target.value;
+                        clearTimeout(window.searchTimeout);
+                        window.searchTimeout = setTimeout(function() {
+                            const cursorPos = e.target.selectionStart;
+                            render();
+                            setTimeout(function() {
+                                const newInput = document.getElementById('dashboardSearch');
+                                if (newInput) {
+                                    newInput.setSelectionRange(cursorPos, cursorPos);
+                                    newInput.focus();
+                                }
+                            }, 0);
+                        }, 300);
+                    };
+                }
+                
+                // Attach click handlers to guest items
+                const guestItems = document.querySelectorAll('.guest-item');
+                guestItems.forEach(function(item) {
+                    const guestId = parseInt(item.getAttribute('data-guest-id'));
+                    const checkedIn = item.getAttribute('data-checked-in') === 'true';
+                    if (!checkedIn) {
+                        item.onclick = function() {
+                            selectGuest(guestId);
+                        };
+                    }
+                });
+            }, 0);
+        }
+
+        function changeView(view) {
+            state.view = view;
+            state.searchTerm = '';
+            state.selectedGuest = null;
+            render();
+        }
+
+        function selectGuest(id) {
+            state.selectedGuest = state.guests.find(function(g) { return g.id === id; });
+            render();
+        }
+
+        let syncInterval = null;
+        
+        function startSync() {
+            if (FIREBASE_URL) {
+                syncInterval = setInterval(async function() {
+                    try {
+                        const response = await fetch(FIREBASE_URL);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data && data.lastUpdated !== state.lastSync) {
+                                state.guests = data.guests || [];
+                                state.lastSync = data.lastUpdated;
+                                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                                render();
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Sync error:', e);
+                    }
+                }, 5000);
+            }
+        }
+
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                if (syncInterval) clearInterval(syncInterval);
+            } else {
+                startSync();
+            }
+        });
+
+        loadData().then(function() {
+            render();
+            startSync();
+        });
+    </script>
+</body>
+</html>
