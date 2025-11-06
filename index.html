@@ -306,33 +306,54 @@
             alert('Downloading ' + state.guests.length + ' QR codes. This will take about ' + Math.ceil(state.guests.length * 0.8 / 60) + ' minutes...');
         }
 
-        async function startScanner() {
-            state.scanning = true;
-            state.view = 'scanner';
-            scanStatus = 'scanning';
-            scanMessage = 'Initializing camera...';
-            render();
+async function startScanner() {
+    state.scanning = true;
+    state.view = 'scanner';
+    scanStatus = 'scanning';
+    scanMessage = 'Initializing camera...';
+    render();
+    
+    // Small delay to ensure DOM is ready
+    setTimeout(async function() {
+        try {
+            const video = document.getElementById('scannerVideo');
+            if (!video) {
+                alert('Video element not found. Please try again.');
+                state.scanning = false;
+                state.view = 'checkin';
+                render();
+                return;
+            }
             
-            try {
-                const video = document.getElementById('scannerVideo');
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } 
-                });
-                video.srcObject = stream;
-                await video.play();
-                
+            const constraints = { 
+                video: { 
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            };
+            
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            
+            video.onloadedmetadata = function() {
+                video.play();
                 scanStatus = 'scanning';
                 scanMessage = 'Scanning for QR code...';
                 lastScanAttempt = Date.now();
                 updateScannerUI();
                 scanQRCode();
-            } catch (err) {
-                alert('Camera access denied. Please enable camera permissions and try again.');
-                state.scanning = false;
-                state.view = 'checkin';
-                render();
-            }
+            };
+            
+        } catch (err) {
+            console.error('Camera error:', err);
+            alert('Camera access failed: ' + err.message + '\n\nPlease check:\n1. Camera permissions are enabled\n2. No other app is using the camera\n3. Try refreshing the page');
+            state.scanning = false;
+            state.view = 'checkin';
+            render();
         }
+    }, 100);
+}
 
         function updateScannerUI() {
             const statusEl = document.getElementById('scanStatus');
@@ -397,13 +418,17 @@
             requestAnimationFrame(scanQRCode);
         }
 
-        function stopScanner() {
-            state.scanning = false;
-            const video = document.getElementById('scannerVideo');
-            if (video && video.srcObject) {
-                video.srcObject.getTracks().forEach(function(track) { track.stop(); });
-            }
-        }
+function stopScanner() {
+    state.scanning = false;
+    const video = document.getElementById('scannerVideo');
+    if (video && video.srcObject) {
+        const tracks = video.srcObject.getTracks();
+        tracks.forEach(function(track) { 
+            track.stop(); 
+        });
+        video.srcObject = null;
+    }
+}
 
         function checkIn(guestId) {
             state.guests = state.guests.map(function(g) {
