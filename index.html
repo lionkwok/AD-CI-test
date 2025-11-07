@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Event Check-in System</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
@@ -79,6 +79,10 @@
         .filter-tab { padding: 8px 16px; border: 2px solid #e2e8f0; border-radius: 8px; cursor: pointer; background: white; font-size: 14px; font-weight: 600; transition: all 0.2s; }
         .filter-tab:hover { border-color: #667eea; }
         .filter-tab.active { background: #667eea; color: white; border-color: #667eea; }
+        .checkbox-group { margin: 16px 0; padding: 12px; background: #f7fafc; border-radius: 8px; }
+        .checkbox-label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+        .checkbox-label input { cursor: pointer; width: 18px; height: 18px; }
+        .import-result { margin-top: 12px; padding: 12px; background: #edf2f7; border-radius: 8px; font-size: 14px; }
         @media (max-width: 768px) {
             .title { font-size: 20px; }
             .header { flex-direction: column; align-items: stretch; }
@@ -106,7 +110,9 @@
             lastSync: null,
             scanning: false,
             syncing: false,
-            filter: 'all'
+            filter: 'all',
+            importMode: 'skip',
+            importResult: null
         };
 
         async function loadData() {
@@ -147,14 +153,16 @@
             if (FIREBASE_URL) {
                 try {
                     state.syncing = true;
-                    await fetch(FIREBASE_URL, {
+                    console.log('Saving to Firebase:', FIREBASE_URL);
+                    const response = await fetch(FIREBASE_URL, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(data)
                     });
+                    console.log('Save response:', response.status);
                     state.syncing = false;
                 } catch (e) {
-                    console.log('Cloud sync failed');
+                    console.error('Cloud sync failed:', e);
                     state.syncing = false;
                 }
             }
@@ -175,7 +183,7 @@
             
             const info = document.createElement('div');
             info.style.cssText = 'margin-top: 10px; font-size: 14px; color: #666;';
-            const guest = state.guests.find(g => g.id === guestId);
+            const guest = state.guests.find(function(g) { return g.id === guestId; });
             info.textContent = 'Table ' + guest.table + ', Seat ' + guest.seat;
             container.appendChild(info);
             
@@ -235,43 +243,92 @@
         function parseCSV(content) {
             const lines = content.trim().split('\n');
             const newGuests = [];
+            const existingPhones = {};
+            let skippedCount = 0;
+            let updatedCount = 0;
+            
+            // Build map of existing guests by phone
+            state.guests.forEach(function(g) {
+                if (g.phone) {
+                    existingPhones[g.phone] = g;
+                }
+            });
             
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 if (i === 0 && line.toLowerCase().includes('name')) continue;
                 const parts = line.split(',').map(function(s) { return s.trim(); });
-                if (parts.length >= 4) {
+                if (parts.length >= 5) {
                     const name = parts[0];
                     const phone = parts[1] || '';
-                    const table = parts[2];
-                    const seat = parts[3];
+                    const company = parts[2] || '';
+                    const table = parts[3];
+                    const seat = parts[4];
+                    
                     if (name && table && seat) {
-                        newGuests.push({
-                            id: Date.now() + i,
-                            name: name,
-                            phone: phone,
-                            table: table,
-                            seat: seat,
-                            checkedIn: false,
-                            checkInTime: null
-                        });
+                        // Check for duplicate phone
+                        if (phone && existingPhones[phone]) {
+                            if (state.importMode === 'update') {
+                                // Update existing guest
+                                const existingGuest = existingPhones[phone];
+                                existingGuest.name = name;
+                                existingGuest.company = company;
+                                existingGuest.table = table;
+                                existingGuest.seat = seat;
+                                updatedCount++;
+                            } else {
+                                // Skip duplicate
+                                skippedCount++;
+                            }
+                        } else {
+                            // Add new guest
+                            const newGuest = {
+                                id: Date.now() + i + Math.random(),
+                                name: name,
+                                phone: phone,
+                                company: company,
+                                table: table,
+                                seat: seat,
+                                checkedIn: false,
+                                checkInTime: null
+                            };
+                            newGuests.push(newGuest);
+                            if (phone) existingPhones[phone] = newGuest;
+                        }
                     }
                 }
             }
             
-            if (newGuests.length > 0) {
-                state.guests = newGuests;
+            if (newGuests.length > 0 || updatedCount > 0) {
+                state.guests = state.guests.concat(newGuests);
                 saveData();
-                alert('Successfully imported ' + newGuests.length + ' guests!');
+                
+                let message = 'Imported ' + newGuests.length + ' new guests';
+                if (updatedCount > 0) message += ', Updated ' + updatedCount + ' existing';
+                if (skippedCount > 0) message += ', Skipped ' + skippedCount + ' duplicates';
+                
+                state.importResult = message;
+                state.csvInput = '';
+                render();
+                
+                setTimeout(function() {
+                    state.importResult = null;
+                    render();
+                }, 5000);
+            } else if (skippedCount > 0) {
+                state.importResult = 'All ' + skippedCount + ' records were duplicates (skipped)';
+                setTimeout(function() {
+                    state.importResult = null;
+                    render();
+                }, 5000);
                 render();
             } else {
-                alert('No valid data found. Format: Name, Phone, Table, Seat');
+                alert('No valid data found. Format: Name, Phone, Company, Table, Seat');
             }
         }
 
         function importCSV() {
             parseCSV(state.csvInput);
-            state.csvInput = '';
         }
 
         function deleteGuest(id) {
@@ -306,54 +363,53 @@
             alert('Downloading ' + state.guests.length + ' QR codes. This will take about ' + Math.ceil(state.guests.length * 0.8 / 60) + ' minutes...');
         }
 
-async function startScanner() {
-    state.scanning = true;
-    state.view = 'scanner';
-    scanStatus = 'scanning';
-    scanMessage = 'Initializing camera...';
-    render();
-    
-    // Small delay to ensure DOM is ready
-    setTimeout(async function() {
-        try {
-            const video = document.getElementById('scannerVideo');
-            if (!video) {
-                alert('Video element not found. Please try again.');
-                state.scanning = false;
-                state.view = 'checkin';
-                render();
-                return;
-            }
-            
-            const constraints = { 
-                video: { 
-                    facingMode: 'environment',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                } 
-            };
-            
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            video.srcObject = stream;
-            
-            video.onloadedmetadata = function() {
-                video.play();
-                scanStatus = 'scanning';
-                scanMessage = 'Scanning for QR code...';
-                lastScanAttempt = Date.now();
-                updateScannerUI();
-                scanQRCode();
-            };
-            
-        } catch (err) {
-            console.error('Camera error:', err);
-            alert('Camera access failed: ' + err.message + '\n\nPlease check:\n1. Camera permissions are enabled\n2. No other app is using the camera\n3. Try refreshing the page');
-            state.scanning = false;
-            state.view = 'checkin';
+        async function startScanner() {
+            state.scanning = true;
+            state.view = 'scanner';
+            scanStatus = 'scanning';
+            scanMessage = 'Initializing camera...';
             render();
+            
+            setTimeout(async function() {
+                try {
+                    const video = document.getElementById('scannerVideo');
+                    if (!video) {
+                        alert('Video element not found. Please try again.');
+                        state.scanning = false;
+                        state.view = 'checkin';
+                        render();
+                        return;
+                    }
+                    
+                    const constraints = { 
+                        video: { 
+                            facingMode: 'environment',
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        } 
+                    };
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    video.srcObject = stream;
+                    
+                    video.onloadedmetadata = function() {
+                        video.play();
+                        scanStatus = 'scanning';
+                        scanMessage = 'Scanning for QR code...';
+                        lastScanAttempt = Date.now();
+                        updateScannerUI();
+                        scanQRCode();
+                    };
+                    
+                } catch (err) {
+                    console.error('Camera error:', err);
+                    alert('Camera access failed: ' + err.message);
+                    state.scanning = false;
+                    state.view = 'checkin';
+                    render();
+                }
+            }, 100);
         }
-    }, 100);
-}
 
         function updateScannerUI() {
             const statusEl = document.getElementById('scanStatus');
@@ -368,6 +424,9 @@ async function startScanner() {
             
             const video = document.getElementById('scannerVideo');
             const canvas = document.getElementById('qrCanvas');
+            
+            if (!video || !canvas) return;
+            
             const ctx = canvas.getContext('2d');
             
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
@@ -376,59 +435,64 @@ async function startScanner() {
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
                 
-                if (code) {
-                    if (code.data.indexOf('CHECKIN:') === 0) {
-                        const guestId = parseInt(code.data.split(':')[1]);
-                        const guest = state.guests.find(function(g) { return g.id === guestId; });
-                        
-                        if (guest) {
-                            scanStatus = 'valid';
-                            scanMessage = '✓ Found: ' + guest.name;
-                            updateScannerUI();
+                if (typeof jsQR !== 'undefined') {
+                    const code = jsQR(imageData.data, imageData.width, imageData.height);
+                    
+                    if (code) {
+                        if (code.data.indexOf('CHECKIN:') === 0) {
+                            const guestId = parseFloat(code.data.split(':')[1]);
+                            const guest = state.guests.find(function(g) { return g.id === guestId; });
                             
-                            setTimeout(function() {
-                                stopScanner();
-                                state.selectedGuest = guest;
-                                state.view = 'checkin';
-                                render();
-                            }, 1000);
-                            return;
+                            if (guest) {
+                                scanStatus = 'valid';
+                                scanMessage = '✓ Found: ' + guest.name;
+                                updateScannerUI();
+                                
+                                setTimeout(function() {
+                                    stopScanner();
+                                    state.selectedGuest = guest;
+                                    state.view = 'checkin';
+                                    render();
+                                }, 1000);
+                                return;
+                            } else {
+                                scanStatus = 'invalid';
+                                scanMessage = '✗ QR code not in guest list';
+                                updateScannerUI();
+                            }
                         } else {
                             scanStatus = 'invalid';
-                            scanMessage = '✗ QR code not in guest list';
+                            scanMessage = '✗ Not a valid check-in QR code';
                             updateScannerUI();
                         }
                     } else {
-                        scanStatus = 'invalid';
-                        scanMessage = '✗ Not a valid check-in QR code';
-                        updateScannerUI();
+                        const timeSinceLastAttempt = Date.now() - lastScanAttempt;
+                        if (timeSinceLastAttempt > 3000) {
+                            scanStatus = 'scanning';
+                            scanMessage = '⟳ No QR code detected - keep trying...';
+                            updateScannerUI();
+                        }
                     }
                 } else {
-                    const timeSinceLastAttempt = Date.now() - lastScanAttempt;
-                    if (timeSinceLastAttempt > 3000) {
-                        scanStatus = 'scanning';
-                        scanMessage = '⟳ No QR code detected - keep trying...';
-                        updateScannerUI();
-                    }
+                    scanStatus = 'invalid';
+                    scanMessage = '✗ QR Scanner library not loaded';
+                    updateScannerUI();
                 }
             }
             
             requestAnimationFrame(scanQRCode);
         }
 
-function stopScanner() {
-    state.scanning = false;
-    const video = document.getElementById('scannerVideo');
-    if (video && video.srcObject) {
-        const tracks = video.srcObject.getTracks();
-        tracks.forEach(function(track) { 
-            track.stop(); 
-        });
-        video.srcObject = null;
-    }
-}
+        function stopScanner() {
+            state.scanning = false;
+            const video = document.getElementById('scannerVideo');
+            if (video && video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(function(track) { track.stop(); });
+                video.srcObject = null;
+            }
+        }
 
         function checkIn(guestId) {
             state.guests = state.guests.map(function(g) {
@@ -437,6 +501,7 @@ function stopScanner() {
                         id: g.id,
                         name: g.name,
                         phone: g.phone,
+                        company: g.company,
                         table: g.table,
                         seat: g.seat,
                         checkedIn: true,
@@ -459,18 +524,22 @@ function stopScanner() {
         }
 
         function exportData() {
-            let csv = 'Name,Phone,Table,Seat,Status,Check-in Time\n';
+            // UTF-8 BOM for proper Unicode support in Excel
+            const BOM = '\uFEFF';
+            let csv = BOM + 'Name,Phone,Company,Table,Seat,Status,Check-in Time\n';
+            
             for (let i = 0; i < state.guests.length; i++) {
                 const g = state.guests[i];
-                csv += '"' + g.name + '",';
-                csv += (g.phone || '') + ',';
+                csv += '"' + (g.name || '') + '",';
+                csv += '"' + (g.phone || '') + '",';
+                csv += '"' + (g.company || '') + '",';
                 csv += g.table + ',';
                 csv += g.seat + ',';
                 csv += (g.checkedIn ? 'Checked In' : 'Pending') + ',';
                 csv += (g.checkInTime ? new Date(g.checkInTime).toLocaleString() : '') + '\n';
             }
             
-            const blob = new Blob([csv], { type: 'text/csv' });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
@@ -482,18 +551,17 @@ function stopScanner() {
             const term = state.searchTerm.toLowerCase();
             let filtered = state.guests;
             
-            // Apply status filter
             if (state.filter === 'checked-in') {
                 filtered = filtered.filter(function(g) { return g.checkedIn; });
             } else if (state.filter === 'pending') {
                 filtered = filtered.filter(function(g) { return !g.checkedIn; });
             }
             
-            // Apply search
             if (term) {
                 filtered = filtered.filter(function(g) {
                     return g.name.toLowerCase().indexOf(term) >= 0 ||
-                           (g.phone && g.phone.indexOf(term) >= 0);
+                           (g.phone && g.phone.indexOf(term) >= 0) ||
+                           (g.company && g.company.toLowerCase().indexOf(term) >= 0);
                 });
             }
             
@@ -509,11 +577,15 @@ function stopScanner() {
         }
 
         function setupFirebase() {
-            const url = prompt('Enter your Firebase Realtime Database URL:\n\nExample: https://your-project.firebaseio.com/checkin.json\n\nLeave empty to skip cloud sync.');
+            const url = prompt('Enter your Firebase Realtime Database URL:\n\nExample: https://your-project.firebaseio.com/guests.json\n\nLeave empty to skip cloud sync.');
             if (url) {
                 localStorage.setItem('firebaseUrl', url);
                 location.reload();
             }
+        }
+
+        function setImportMode(mode) {
+            state.importMode = mode;
         }
 
         function renderAdmin() {
@@ -533,18 +605,36 @@ function stopScanner() {
 
             html += '<div class="card">';
             html += '<h2 style="margin-bottom: 16px; font-size: 20px;">Import Guest List</h2>';
-            html += '<p style="color: #718096; margin-bottom: 12px;">Format: Name, Phone, Table, Seat (one guest per line)</p>';
-            html += '<div style="margin-bottom: 16px;">';
+            html += '<p style="color: #718096; margin-bottom: 12px;">Format: Name, Phone, Company, Table, Seat</p>';
+            
+            html += '<div class="checkbox-group">';
+            html += '<div style="font-weight: 600; margin-bottom: 8px;">Import Mode:</div>';
+            html += '<label class="checkbox-label">';
+            html += '<input type="radio" name="importMode" value="skip" ' + (state.importMode === 'skip' ? 'checked' : '') + ' onchange="setImportMode(\'skip\')"> Skip duplicates (by phone number)';
+            html += '</label>';
+            html += '<label class="checkbox-label">';
+            html += '<input type="radio" name="importMode" value="update" ' + (state.importMode === 'update' ? 'checked' : '') + ' onchange="setImportMode(\'update\')"> Update existing records (by phone number)';
+            html += '</label>';
+            html += '</div>';
+            
+            if (state.importResult) {
+                html += '<div class="import-result">✓ ' + state.importResult + '</div>';
+            }
+            
+            html += '<div style="margin: 16px 0;">';
             html += '<label for="fileUpload" class="file-upload">📁 Upload CSV File</label>';
             html += '<input type="file" id="fileUpload" accept=".csv">';
             html += '<span style="margin-left: 12px; color: #718096; font-size: 14px;">or paste below</span>';
             html += '</div>';
+            
             html += '<div style="background: #edf2f7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px;">';
             html += '<strong>Example CSV format:</strong><br>';
-            html += 'Name, Phone, Table, Seat<br>';
-            html += 'John Doe, 0123456789, 5, 3<br>';
-            html += 'Jane Smith, 0198765432, 5, 4';
+            html += 'Name, Phone, Company, Table, Seat<br>';
+            html += 'John Doe, 0123456789, ABC Corp, 5, 3<br>';
+            html += '山田太郎, 0198765432, XYZ Inc, 5, 4<br>';
+            html += 'Jane Smith, 0111222333, , 6, 1  (company optional)';
             html += '</div>';
+            
             html += '<textarea id="csvInput" rows="8" placeholder="Or paste CSV data here..."></textarea>';
             html += '<button class="btn btn-primary" onclick="state.csvInput = document.getElementById(\'csvInput\').value; importCSV()" style="margin-top: 12px;">📤 Import from Text</button>';
             html += '</div>';
@@ -559,7 +649,7 @@ function stopScanner() {
                 html += '</div></div>';
                 html += '<div class="table-responsive" style="margin-top: 16px;">';
                 html += '<table><thead><tr>';
-                html += '<th>Name</th><th>Phone</th><th>Table</th><th>Seat</th><th>Status</th><th>QR Code</th><th>Actions</th>';
+                html += '<th>Name</th><th>Phone</th><th>Company</th><th>Table</th><th>Seat</th><th>Status</th><th>QR Code</th><th>Actions</th>';
                 html += '</tr></thead><tbody>';
                 
                 for (let i = 0; i < state.guests.length; i++) {
@@ -567,6 +657,7 @@ function stopScanner() {
                     html += '<tr>';
                     html += '<td>' + g.name + '</td>';
                     html += '<td>' + (g.phone || '-') + '</td>';
+                    html += '<td>' + (g.company || '-') + '</td>';
                     html += '<td>' + g.table + '</td>';
                     html += '<td>' + g.seat + '</td>';
                     html += '<td><span class="badge ' + (g.checkedIn ? 'badge-success' : 'badge-pending') + '">';
@@ -628,17 +719,16 @@ function stopScanner() {
             html += '<div class="card">';
             html += '<h2 style="font-size: 20px; margin-bottom: 16px;">Guest List</h2>';
             
-            // Filter tabs
             html += '<div class="filter-tabs">';
             html += '<button class="filter-tab ' + (state.filter === 'all' ? 'active' : '') + '" onclick="state.filter=\'all\'; render()">All (' + stats.total + ')</button>';
             html += '<button class="filter-tab ' + (state.filter === 'checked-in' ? 'active' : '') + '" onclick="state.filter=\'checked-in\'; render()">Checked In (' + stats.checkedIn + ')</button>';
             html += '<button class="filter-tab ' + (state.filter === 'pending' ? 'active' : '') + '" onclick="state.filter=\'pending\'; render()">Pending (' + stats.pending + ')</button>';
             html += '</div>';
             
-            html += '<input type="text" class="search-input" placeholder="Search by name or phone..." value="' + state.searchTerm + '" id="dashboardSearch">';
+            html += '<input type="text" class="search-input" placeholder="Search by name, phone or company..." value="' + state.searchTerm + '" id="dashboardSearch">';
             html += '<div class="table-responsive" style="margin-top: 16px;">';
             html += '<table><thead><tr>';
-            html += '<th>Name</th><th>Phone</th><th>Table</th><th>Seat</th><th>Status</th><th>Time</th>';
+            html += '<th>Name</th><th>Phone</th><th>Company</th><th>Table</th><th>Seat</th><th>Status</th><th>Time</th>';
             html += '</tr></thead><tbody>';
             
             for (let i = 0; i < filtered.length; i++) {
@@ -646,6 +736,7 @@ function stopScanner() {
                 html += '<tr>';
                 html += '<td>' + g.name + '</td>';
                 html += '<td>' + (g.phone || '-') + '</td>';
+                html += '<td>' + (g.company || '-') + '</td>';
                 html += '<td>' + g.table + '</td>';
                 html += '<td>' + g.seat + '</td>';
                 html += '<td><span class="badge ' + (g.checkedIn ? 'badge-success' : 'badge-pending') + '">';
@@ -692,6 +783,9 @@ function stopScanner() {
                 html += '<p style="font-size: 20px; margin-bottom: 16px;">You\'re all checked in</p>';
                 html += '<div class="confirmation-box">';
                 html += '<p style="font-size: 24px; font-weight: bold; margin-bottom: 12px;">' + state.selectedGuest.name + '</p>';
+                if (state.selectedGuest.company) {
+                    html += '<p style="font-size: 18px; margin-bottom: 8px;">' + state.selectedGuest.company + '</p>';
+                }
                 html += '<div class="table-info">📍 Table ' + state.selectedGuest.table + ', Seat ' + state.selectedGuest.seat + '</div>';
                 html += '</div></div>';
             } else if (state.selectedGuest) {
@@ -701,6 +795,9 @@ function stopScanner() {
                 html += '<div style="font-size: 24px; font-weight: bold; margin-bottom: 8px;">👤 ' + state.selectedGuest.name + '</div>';
                 if (state.selectedGuest.phone) {
                     html += '<div style="font-size: 16px; color: #4a5568; margin-bottom: 8px;">📱 ' + state.selectedGuest.phone + '</div>';
+                }
+                if (state.selectedGuest.company) {
+                    html += '<div style="font-size: 16px; color: #4a5568; margin-bottom: 8px;">🏢 ' + state.selectedGuest.company + '</div>';
                 }
                 html += '<div style="font-size: 18px; color: #4a5568;">📍 Table ' + state.selectedGuest.table + ', Seat ' + state.selectedGuest.seat + '</div>';
                 html += '</div>';
@@ -714,7 +811,7 @@ function stopScanner() {
                 html += '<div style="text-align: center; margin-bottom: 20px; color: #718096;">- OR -</div>';
                 html += '<div class="search-box">';
                 html += '<span class="search-icon">🔍</span>';
-                html += '<input type="text" class="search-input" placeholder="Search by name or phone..." value="' + state.searchTerm + '" id="checkinSearch" autofocus>';
+                html += '<input type="text" class="search-input" placeholder="Search by name, phone or company..." value="' + state.searchTerm + '" id="checkinSearch" autofocus>';
                 html += '</div>';
                 
                 if (state.searchTerm) {
@@ -725,6 +822,7 @@ function stopScanner() {
                             html += '<div class="guest-item ' + (g.checkedIn ? 'disabled' : '') + '" data-guest-id="' + g.id + '" data-checked-in="' + g.checkedIn + '">';
                             html += '<div class="guest-name">👤 ' + g.name + '</div>';
                             html += '<div class="guest-info">';
+                            if (g.company) html += '🏢 ' + g.company + ' • ';
                             if (g.phone) html += '📱 ' + g.phone + ' • ';
                             html += '📍 Table ' + g.table + ', Seat ' + g.seat;
                             if (g.checkedIn) html += ' • <span style="color: #48bb78;">✅ Already Checked In</span>';
@@ -753,13 +851,11 @@ function stopScanner() {
             app.innerHTML = content;
             
             setTimeout(function() {
-                // Attach file upload handler
                 const fileUpload = document.getElementById('fileUpload');
                 if (fileUpload) {
                     fileUpload.onchange = handleFileUpload;
                 }
                 
-                // Attach search handlers with debouncing
                 const checkinSearch = document.getElementById('checkinSearch');
                 if (checkinSearch) {
                     checkinSearch.value = state.searchTerm;
@@ -800,10 +896,9 @@ function stopScanner() {
                     };
                 }
                 
-                // Attach click handlers to guest items
                 const guestItems = document.querySelectorAll('.guest-item');
                 guestItems.forEach(function(item) {
-                    const guestId = parseInt(item.getAttribute('data-guest-id'));
+                    const guestId = parseFloat(item.getAttribute('data-guest-id'));
                     const checkedIn = item.getAttribute('data-checked-in') === 'true';
                     if (!checkedIn) {
                         item.onclick = function() {
@@ -830,23 +925,33 @@ function stopScanner() {
         
         function startSync() {
             if (FIREBASE_URL) {
-                syncInterval = setInterval(async function() {
-                    try {
-                        const response = await fetch(FIREBASE_URL);
-                        if (response.ok) {
-                            const data = await response.json();
-                            if (data && data.lastUpdated !== state.lastSync) {
-                                state.guests = data.guests || [];
-                                state.lastSync = data.lastUpdated;
-                                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-                                render();
-                            }
-                        }
-                    } catch (e) {
-                        console.log('Sync error:', e);
-                    }
-                }, 5000);
+                console.log('Starting sync with:', FIREBASE_URL);
+                syncNow();
+                syncInterval = setInterval(syncNow, 5000);
             }
+        }
+
+        function syncNow() {
+            fetch(FIREBASE_URL)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    console.log('Sync received:', data);
+                    if (data && data.lastUpdated !== state.lastSync) {
+                        console.log('Updating local data');
+                        state.guests = data.guests || [];
+                        state.lastSync = data.lastUpdated;
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                        render();
+                    }
+                })
+                .catch(function(e) {
+                    console.error('Sync error:', e);
+                });
         }
 
         document.addEventListener('visibilitychange', function() {
