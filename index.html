@@ -25,6 +25,8 @@
         .btn-success:hover { background: #38a169; }
         .btn-danger { background: #f56565; color: white; }
         .btn-danger:hover { background: #e53e3e; }
+        .btn-warning { background: #ed8936; color: white; }
+        .btn-warning:hover { background: #dd6b20; }
         .btn-sm { padding: 6px 12px; font-size: 12px; }
         .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 20px; }
         .stat-card { background: #f7fafc; padding: 20px; border-radius: 8px; }
@@ -49,7 +51,11 @@
         textarea { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-family: monospace; resize: vertical; }
         table { width: 100%; border-collapse: collapse; }
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e2e8f0; }
-        th { background: #f7fafc; font-weight: 600; position: sticky; top: 0; }
+        th { background: #f7fafc; font-weight: 600; position: sticky; top: 0; cursor: pointer; user-select: none; }
+        th:hover { background: #edf2f7; }
+        th.sortable::after { content: ' ⇅'; color: #cbd5e0; }
+        th.sort-asc::after { content: ' ▲'; color: #667eea; }
+        th.sort-desc::after { content: ' ▼'; color: #667eea; }
         tr:hover { background: #f7fafc; }
         .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
         .badge-success { background: #c6f6d5; color: #22543d; }
@@ -60,6 +66,8 @@
         .file-upload { display: inline-block; padding: 10px 20px; background: #667eea; color: white; border-radius: 8px; cursor: pointer; font-weight: 600; }
         .file-upload:hover { background: #5568d3; }
         input[type="file"] { display: none; }
+        .file-preview { margin: 16px 0; padding: 12px; background: #edf2f7; border-radius: 8px; border: 2px solid #cbd5e0; }
+        .file-preview-name { font-weight: 600; margin-bottom: 8px; }
         .video-container { position: relative; width: 100%; max-width: 500px; margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden; }
         video { width: 100%; display: block; }
         .scan-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 3px solid #48bb78; width: 250px; height: 250px; border-radius: 8px; }
@@ -82,7 +90,7 @@
         .checkbox-group { margin: 16px 0; padding: 12px; background: #f7fafc; border-radius: 8px; }
         .checkbox-label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
         .checkbox-label input { cursor: pointer; width: 18px; height: 18px; }
-        .import-result { margin-top: 12px; padding: 12px; background: #edf2f7; border-radius: 8px; font-size: 14px; }
+        .import-result { margin-top: 12px; padding: 12px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 8px; font-size: 14px; color: #155724; }
         @media (max-width: 768px) {
             .title { font-size: 20px; }
             .header { flex-direction: column; align-items: stretch; }
@@ -112,7 +120,10 @@
             syncing: false,
             filter: 'all',
             importMode: 'skip',
-            importResult: null
+            importResult: null,
+            selectedFile: null,
+            sortBy: null,
+            sortOrder: 'asc'
         };
 
         async function loadData() {
@@ -151,19 +162,28 @@
             state.lastSync = data.lastUpdated;
             
             if (FIREBASE_URL) {
+                state.syncing = true;
+                render();
+                
                 try {
-                    state.syncing = true;
                     console.log('Saving to Firebase:', FIREBASE_URL);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(function() { controller.abort(); }, 10000);
+                    
                     const response = await fetch(FIREBASE_URL, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
+                        body: JSON.stringify(data),
+                        signal: controller.signal
                     });
+                    
+                    clearTimeout(timeoutId);
                     console.log('Save response:', response.status);
-                    state.syncing = false;
                 } catch (e) {
                     console.error('Cloud sync failed:', e);
+                } finally {
                     state.syncing = false;
+                    render();
                 }
             }
         }
@@ -228,16 +248,33 @@
             }, 500);
         }
 
-        function handleFileUpload(event) {
+        function handleFileSelect(event) {
             const file = event.target.files[0];
-            if (!file) return;
+            if (file) {
+                state.selectedFile = file;
+                render();
+            }
+        }
+
+        function removeSelectedFile() {
+            state.selectedFile = null;
+            const fileInput = document.getElementById('fileUpload');
+            if (fileInput) fileInput.value = '';
+            render();
+        }
+
+        function importSelectedFile() {
+            if (!state.selectedFile) return;
             
             const reader = new FileReader();
             reader.onload = function(e) {
                 const content = e.target.result;
                 parseCSV(content);
+                state.selectedFile = null;
+                const fileInput = document.getElementById('fileUpload');
+                if (fileInput) fileInput.value = '';
             };
-            reader.readAsText(file);
+            reader.readAsText(state.selectedFile);
         }
 
         function parseCSV(content) {
@@ -247,7 +284,6 @@
             let skippedCount = 0;
             let updatedCount = 0;
             
-            // Build map of existing guests by phone
             state.guests.forEach(function(g) {
                 if (g.phone) {
                     existingPhones[g.phone] = g;
@@ -266,10 +302,8 @@
                     const seat = parts[4];
                     
                     if (name && table && seat) {
-                        // Check for duplicate phone
                         if (phone && existingPhones[phone]) {
                             if (state.importMode === 'update') {
-                                // Update existing guest
                                 const existingGuest = existingPhones[phone];
                                 existingGuest.name = name;
                                 existingGuest.company = company;
@@ -277,11 +311,9 @@
                                 existingGuest.seat = seat;
                                 updatedCount++;
                             } else {
-                                // Skip duplicate
                                 skippedCount++;
                             }
                         } else {
-                            // Add new guest
                             const newGuest = {
                                 id: Date.now() + i + Math.random(),
                                 name: name,
@@ -335,7 +367,27 @@
             if (confirm('Are you sure you want to delete this guest?')) {
                 state.guests = state.guests.filter(function(g) { return g.id !== id; });
                 saveData();
-                render();
+            }
+        }
+
+        function undoCheckIn(id, name) {
+            if (confirm('Undo check-in for ' + name + '?')) {
+                state.guests = state.guests.map(function(g) {
+                    if (g.id === id) {
+                        return {
+                            id: g.id,
+                            name: g.name,
+                            phone: g.phone,
+                            company: g.company,
+                            table: g.table,
+                            seat: g.seat,
+                            checkedIn: false,
+                            checkInTime: null
+                        };
+                    }
+                    return g;
+                });
+                saveData();
             }
         }
 
@@ -524,7 +576,6 @@
         }
 
         function exportData() {
-            // UTF-8 BOM for proper Unicode support in Excel
             const BOM = '\uFEFF';
             let csv = BOM + 'Name,Phone,Company,Table,Seat,Status,Check-in Time\n';
             
@@ -547,6 +598,42 @@
             link.click();
         }
 
+        function sortGuests(guests, sortBy, sortOrder) {
+            if (!sortBy) return guests;
+            
+            const sorted = guests.slice().sort(function(a, b) {
+                let aVal = a[sortBy];
+                let bVal = b[sortBy];
+                
+                if (sortBy === 'checkedIn') {
+                    aVal = a.checkedIn ? 1 : 0;
+                    bVal = b.checkedIn ? 1 : 0;
+                } else if (sortBy === 'table' || sortBy === 'seat') {
+                    aVal = parseInt(aVal) || 0;
+                    bVal = parseInt(bVal) || 0;
+                } else {
+                    aVal = (aVal || '').toString().toLowerCase();
+                    bVal = (bVal || '').toString().toLowerCase();
+                }
+                
+                if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+                return 0;
+            });
+            
+            return sorted;
+        }
+
+        function toggleSort(column) {
+            if (state.sortBy === column) {
+                state.sortOrder = state.sortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                state.sortBy = column;
+                state.sortOrder = 'asc';
+            }
+            render();
+        }
+
         function getFilteredGuests() {
             const term = state.searchTerm.toLowerCase();
             let filtered = state.guests;
@@ -565,7 +652,7 @@
                 });
             }
             
-            return filtered;
+            return sortGuests(filtered, state.sortBy, state.sortOrder);
         }
 
         function getStats() {
@@ -584,6 +671,18 @@
             }
         }
 
+        function modifySyncURL() {
+            const action = confirm('Click OK to change sync URL\nClick Cancel to disable sync');
+            if (action) {
+                setupFirebase();
+            } else {
+                if (confirm('Are you sure you want to disable cloud sync?\n\nData will only be stored locally on this device.')) {
+                    localStorage.removeItem('firebaseUrl');
+                    location.reload();
+                }
+            }
+        }
+
         function setImportMode(mode) {
             state.importMode = mode;
         }
@@ -595,7 +694,11 @@
             html += '<h1 class="title">Admin Panel</h1>';
             html += '<p class="subtitle">Manage guest list and generate QR codes</p>';
             if (FIREBASE_URL) {
-                html += '<p class="sync-info"><span class="sync-indicator ' + (state.syncing ? 'syncing' : 'synced') + '"></span>Cloud sync ' + (state.syncing ? 'syncing' : 'enabled') + '</p>';
+                html += '<p class="sync-info">';
+                html += '<span class="sync-indicator ' + (state.syncing ? 'syncing' : 'synced') + '"></span>';
+                html += 'Cloud sync ' + (state.syncing ? 'syncing' : 'enabled');
+                html += ' • <a href="#" onclick="modifySyncURL(); return false;" style="color: #667eea;">Modify</a>';
+                html += '</p>';
             } else {
                 html += '<p class="sync-info">Local mode • <a href="#" onclick="setupFirebase(); return false;" style="color: #667eea;">Setup cloud sync</a></p>';
             }
@@ -627,6 +730,16 @@
             html += '<span style="margin-left: 12px; color: #718096; font-size: 14px;">or paste below</span>';
             html += '</div>';
             
+            if (state.selectedFile) {
+                html += '<div class="file-preview">';
+                html += '<div class="file-preview-name">📄 Selected: ' + state.selectedFile.name + '</div>';
+                html += '<div class="flex">';
+                html += '<button class="btn btn-primary" onclick="importSelectedFile()">📥 Import This File</button>';
+                html += '<button class="btn btn-danger" onclick="removeSelectedFile()">✖ Remove</button>';
+                html += '</div>';
+                html += '</div>';
+            }
+            
             html += '<div style="background: #edf2f7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px;">';
             html += '<strong>Example CSV format:</strong><br>';
             html += 'Name, Phone, Company, Table, Seat<br>';
@@ -640,6 +753,7 @@
             html += '</div>';
 
             if (state.guests.length > 0) {
+                const sortedGuests = sortGuests(state.guests, state.sortBy, state.sortOrder);
                 html += '<div class="card">';
                 html += '<div class="header">';
                 html += '<h2 style="font-size: 20px;">Guest List (' + state.guests.length + ')</h2>';
@@ -649,11 +763,17 @@
                 html += '</div></div>';
                 html += '<div class="table-responsive" style="margin-top: 16px;">';
                 html += '<table><thead><tr>';
-                html += '<th>Name</th><th>Phone</th><th>Company</th><th>Table</th><th>Seat</th><th>Status</th><th>QR Code</th><th>Actions</th>';
+                html += '<th class="sortable ' + (state.sortBy === 'name' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'name\')">Name</th>';
+                html += '<th class="sortable ' + (state.sortBy === 'phone' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'phone\')">Phone</th>';
+                html += '<th class="sortable ' + (state.sortBy === 'company' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'company\')">Company</th>';
+                html += '<th class="sortable ' + (state.sortBy === 'table' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'table\')">Table</th>';
+                html += '<th class="sortable ' + (state.sortBy === 'seat' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'seat\')">Seat</th>';
+                html += '<th class="sortable ' + (state.sortBy === 'checkedIn' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'checkedIn\')">Status</th>';
+                html += '<th>QR Code</th><th>Actions</th>';
                 html += '</tr></thead><tbody>';
                 
-                for (let i = 0; i < state.guests.length; i++) {
-                    const g = state.guests[i];
+                for (let i = 0; i < sortedGuests.length; i++) {
+                    const g = sortedGuests[i];
                     html += '<tr>';
                     html += '<td>' + g.name + '</td>';
                     html += '<td>' + (g.phone || '-') + '</td>';
@@ -663,7 +783,12 @@
                     html += '<td><span class="badge ' + (g.checkedIn ? 'badge-success' : 'badge-pending') + '">';
                     html += (g.checkedIn ? 'Checked In' : 'Pending') + '</span></td>';
                     html += '<td><button class="btn btn-sm btn-primary" onclick="downloadSingleQR(' + g.id + ', \'' + g.name.replace(/'/g, "\\'") + '\')">Download</button></td>';
-                    html += '<td><button class="btn btn-sm btn-danger" onclick="deleteGuest(' + g.id + ')">Delete</button></td>';
+                    html += '<td><div class="flex">';
+                    if (g.checkedIn) {
+                        html += '<button class="btn btn-sm btn-warning" onclick="undoCheckIn(' + g.id + ', \'' + g.name.replace(/'/g, "\\'") + '\')">Undo</button>';
+                    }
+                    html += '<button class="btn btn-sm btn-danger" onclick="deleteGuest(' + g.id + ')">Delete</button>';
+                    html += '</div></td>';
                     html += '</tr>';
                 }
                 
@@ -728,7 +853,13 @@
             html += '<input type="text" class="search-input" placeholder="Search by name, phone or company..." value="' + state.searchTerm + '" id="dashboardSearch">';
             html += '<div class="table-responsive" style="margin-top: 16px;">';
             html += '<table><thead><tr>';
-            html += '<th>Name</th><th>Phone</th><th>Company</th><th>Table</th><th>Seat</th><th>Status</th><th>Time</th>';
+            html += '<th class="sortable ' + (state.sortBy === 'name' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'name\')">Name</th>';
+            html += '<th class="sortable ' + (state.sortBy === 'phone' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'phone\')">Phone</th>';
+            html += '<th class="sortable ' + (state.sortBy === 'company' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'company\')">Company</th>';
+            html += '<th class="sortable ' + (state.sortBy === 'table' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'table\')">Table</th>';
+            html += '<th class="sortable ' + (state.sortBy === 'seat' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'seat\')">Seat</th>';
+            html += '<th class="sortable ' + (state.sortBy === 'checkedIn' ? 'sort-' + state.sortOrder : '') + '" onclick="toggleSort(\'checkedIn\')">Status</th>';
+            html += '<th>Time</th>';
             html += '</tr></thead><tbody>';
             
             for (let i = 0; i < filtered.length; i++) {
@@ -853,7 +984,7 @@
             setTimeout(function() {
                 const fileUpload = document.getElementById('fileUpload');
                 if (fileUpload) {
-                    fileUpload.onchange = handleFileUpload;
+                    fileUpload.onchange = handleFileSelect;
                 }
                 
                 const checkinSearch = document.getElementById('checkinSearch');
@@ -940,9 +1071,7 @@
                     return response.json();
                 })
                 .then(function(data) {
-                    console.log('Sync received:', data);
                     if (data && data.lastUpdated !== state.lastSync) {
-                        console.log('Updating local data');
                         state.guests = data.guests || [];
                         state.lastSync = data.lastUpdated;
                         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
